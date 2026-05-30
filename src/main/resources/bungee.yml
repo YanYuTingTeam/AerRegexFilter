@@ -1,0 +1,4 @@
+name: AerRegexFilter
+version: 1.0
+main: com.aermini.regexfilter.AerRegexFilter
+author: AerMini
