@@ -21,9 +21,7 @@ import java.util.regex.Pattern;
 
 public class AerRegexFilter extends JavaPlugin implements Listener {
     private FileConfiguration config;
-    private Pattern nameRegex;
     private Pattern chatRegex;
-    private Pattern nameAllowPattern;
     private final Map<Pattern, String> chatReplacements = new HashMap<>();
 
     @Override
@@ -40,9 +38,7 @@ public class AerRegexFilter extends JavaPlugin implements Listener {
     public void loadConfig() {
         reloadConfig();
         config = getConfig();
-        nameRegex = compile(config.getString("name-regex"));
         chatRegex = compile(config.getString("chat-regex"));
-        nameAllowPattern = compile(config.getString("name.allowregex", ".*"));
         chatReplacements.clear();
 
         ConfigurationSection replaceSection = config.getConfigurationSection("chat.replace");
@@ -100,41 +96,6 @@ public class AerRegexFilter extends JavaPlugin implements Listener {
         }
         m.appendTail(sb);
         return sb.toString();
-    }
-
-    @EventHandler
-    public void onPreLogin(AsyncPlayerPreLoginEvent event) {
-        if (!config.getBoolean("regexfilter.name", true)) return;
-        String name = event.getName();
-        boolean invalid = (getVisualLength(name) > config.getInt("name.maxlenth", 16)) ||
-                (!nameAllowPattern.matcher(name).matches()) ||
-                (nameRegex != null && nameRegex.matcher(name).find());
-
-        if (config.getBoolean("debug", true)) {
-            getLogger().severe(String.format("onPreLogin: %s, %s, %s",
-                    (getVisualLength(name) > config.getInt("name.maxlenth", 16)),
-                    (!nameAllowPattern.matcher(name).matches()),
-                    (nameRegex != null && nameRegex.matcher(name).find())));
-        }
-
-        if (invalid && config.getBoolean("name.forbidden-kick", true)) {
-            List<String> messages = config.getStringList("name.kick-message");
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < messages.size(); i++) {
-                sb.append(ChatColor.translateAlternateColorCodes('&', messages.get(i)));
-                if (i < messages.size() - 1) sb.append("\n");
-            }
-            event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, sb.toString());
-        }
-    }
-
-    private int getVisualLength(String str) {
-        int len = 0;
-        for (char c : str.toCharArray()) {
-            if (c >= '\u4e00' && c <= '\u9fa5') len += 2;
-            else len += 1;
-        }
-        return len;
     }
 
     private static class FilterCommand implements CommandExecutor {
