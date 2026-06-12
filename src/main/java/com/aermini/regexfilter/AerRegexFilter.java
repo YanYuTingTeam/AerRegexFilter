@@ -60,9 +60,22 @@ public class AerRegexFilter extends Plugin implements Listener {
     }
 
     private Pattern compile(String regex) {
-        if (regex == null || regex.isEmpty()) return null;
-        String sanitized = regex.replaceAll("\\r\\n|\\r|\\n", "").trim();
-        return Pattern.compile(sanitized);
+        if (regex == null) return null;
+        String[] lines = regex.split("\\r\\n|\\r|\\n");
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty() || trimmed.equals("|")) continue;
+            if (trimmed.endsWith("|")) trimmed = trimmed.substring(0, trimmed.length()-1).trim();
+            if (trimmed.isEmpty()) continue;
+            if (!first) sb.append("|");
+            sb.append("(?:").append(trimmed).append(")");
+            first = false;
+        }
+        String finalRegex = sb.toString();
+        if (finalRegex.isEmpty()) return null;
+        return Pattern.compile(finalRegex);
     }
 
     private boolean isServerBlacklisted(ProxiedPlayer player, String category, String listName) {
