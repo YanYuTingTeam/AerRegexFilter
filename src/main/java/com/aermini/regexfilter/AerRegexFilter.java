@@ -1,31 +1,26 @@
 package com.aermini.regexfilter;
 
-import net.md_5.bungee.api.ChatColor;
-import net.md_5.bungee.api.CommandSender;
-import net.md_5.bungee.api.chat.TextComponent;
-import net.md_5.bungee.api.connection.ProxiedPlayer;
-import net.md_5.bungee.api.event.ChatEvent;
-import net.md_5.bungee.api.event.PreLoginEvent;
-import net.md_5.bungee.api.plugin.Command;
-import net.md_5.bungee.api.plugin.Listener;
-import net.md_5.bungee.api.plugin.Plugin;
-import net.md_5.bungee.config.Configuration;
-import net.md_5.bungee.config.ConfigurationProvider;
-import net.md_5.bungee.config.YamlConfiguration;
-import net.md_5.bungee.event.EventHandler;
+import org.bukkit.ChatColor;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandExecutor;
+import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.AsyncPlayerChatEvent;
+import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
+import org.bukkit.plugin.java.JavaPlugin;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class AerRegexFilter extends Plugin implements Listener {
-    private Configuration config;
+public class AerRegexFilter extends JavaPlugin implements Listener {
+    private FileConfiguration config;
     private Pattern nameRegex;
     private Pattern chatRegex;
     private Pattern nameAllowPattern;
@@ -35,28 +30,29 @@ public class AerRegexFilter extends Plugin implements Listener {
     public void onEnable() {
         saveDefaultConfig();
         loadConfig();
-        getProxy().getPluginManager().registerListener(this, this);
-        getProxy().getPluginManager().registerCommand(this, new FilterCommand(this));
+        getServer().getPluginManager().registerEvents(this, this);
+        if (getCommand("aerregexfilter") != null) {
+            getCommand("aerregexfilter").setExecutor(new FilterCommand(this));
+        }
         getLogger().info("AerRegexFilter 加载成功 | by. AerMini");
     }
 
     public void loadConfig() {
-        try {
-            config = ConfigurationProvider.getProvider(YamlConfiguration.class).load(new File(getDataFolder(), "config.yml"));
-            nameRegex = compile(config.getString("name-regex"));
-            chatRegex = compile(config.getString("chat-regex"));
-            nameAllowPattern = compile(config.getString("name.allowregex", ".*"));
-            chatReplacements.clear();
-            Configuration replaceSection = config.getSection("chat.replace");
-            if (replaceSection != null) {
-                for (String key : replaceSection.getKeys()) {
-                    Pattern p = compile(replaceSection.getString(key));
-                    if (p != null) chatReplacements.put(p, key);
-                }
+        reloadConfig();
+        config = getConfig();
+        nameRegex = compile(config.getString("name-regex"));
+        chatRegex = compile(config.getString("chat-regex"));
+        nameAllowPattern = compile(config.getString("name.allowregex", ".*"));
+        chatReplacements.clear();
+
+        ConfigurationSection replaceSection = config.getConfigurationSection("chat.replace");
+        if (replaceSection != null) {
+            for (String key : replaceSection.getKeys(false)) {
+                Pattern p = compile(replaceSection.getString(key));
+                if (p != null) chatReplacements.put(p, key);
             }
-        } catch (IOException e) {
-            getLogger().severe("无法加载配置: " + e.getMessage());
         }
+        if (config.getBoolean("debug", true)) getLogger().severe("arf config loaded");
     }
 
     private Pattern compile(String regex) {
@@ -65,31 +61,30 @@ public class AerRegexFilter extends Plugin implements Listener {
         return Pattern.compile(sanitized);
     }
 
-    private boolean isServerBlacklisted(ProxiedPlayer player, String category, String listName) {
-        if (player == null || player.getServer() == null) return false;
-        String serverName = player.getServer().getInfo().getName();
-        List<String> blacklist = config.getStringList(category + "." + listName);
-        return blacklist != null && blacklist.contains(serverName);
-    }
-
     @EventHandler
-    public void onChat(ChatEvent event) {
-        if (event.isCancelled() || !(event.getSender() instanceof ProxiedPlayer)) return;
-        if (event.isCommand()) return;
-        ProxiedPlayer player = (ProxiedPlayer) event.getSender();
+    public void onChat(AsyncPlayerChatEvent event) {
+        if (config.getBoolean("debug", true)) {
+            getLogger().severe(String.format("onChat: message->%s", event.getMessage()));
+        }
+        if (event.isCancelled()) return;
+
+        Player player = event.getPlayer();
         String message = event.getMessage();
         String original = message;
+
         if (config.getBoolean("regexfilter.chat", true)) {
-            if (!isServerBlacklisted(player, "chat", "replace-blacklist")) {
-                for (Map.Entry<Pattern, String> entry : chatReplacements.entrySet()) {
-                    message = entry.getKey().matcher(message).replaceAll(entry.getValue());
-                }
+            for (Map.Entry<Pattern, String> entry : chatReplacements.entrySet()) {
+                message = entry.getKey().matcher(message).replaceAll(entry.getValue());
             }
-            if (!isServerBlacklisted(player, "chat", "blacklist") && chatRegex != null) {
+            if (chatRegex != null) {
                 message = maskByCharacter(message, chatRegex, config.getString("chat.filter", "*"));
             }
         }
+
+        // 修改消息（Spigot 1.21 会自动在这里剥离玩家签名并正常广播修改后的消息）
         if (!original.equals(message)) event.setMessage(message);
+
+        if (config.getBoolean("debug", true)) getLogger().severe("onChat: newmsg->"+message);
     }
 
     private String maskByCharacter(String text, Pattern pattern, String filter) {
@@ -108,12 +103,20 @@ public class AerRegexFilter extends Plugin implements Listener {
     }
 
     @EventHandler
-    public void onPreLogin(PreLoginEvent event) {
+    public void onPreLogin(AsyncPlayerPreLoginEvent event) {
         if (!config.getBoolean("regexfilter.name", true)) return;
-        String name = event.getConnection().getName();
+        String name = event.getName();
         boolean invalid = (getVisualLength(name) > config.getInt("name.maxlenth", 16)) ||
-                         (!nameAllowPattern.matcher(name).matches()) ||
-                         (nameRegex != null && nameRegex.matcher(name).find());
+                (!nameAllowPattern.matcher(name).matches()) ||
+                (nameRegex != null && nameRegex.matcher(name).find());
+
+        if (config.getBoolean("debug", true)) {
+            getLogger().severe(String.format("onPreLogin: %s, %s, %s",
+                    (getVisualLength(name) > config.getInt("name.maxlenth", 16)),
+                    (!nameAllowPattern.matcher(name).matches()),
+                    (nameRegex != null && nameRegex.matcher(name).find())));
+        }
+
         if (invalid && config.getBoolean("name.forbidden-kick", true)) {
             List<String> messages = config.getStringList("name.kick-message");
             StringBuilder sb = new StringBuilder();
@@ -121,8 +124,7 @@ public class AerRegexFilter extends Plugin implements Listener {
                 sb.append(ChatColor.translateAlternateColorCodes('&', messages.get(i)));
                 if (i < messages.size() - 1) sb.append("\n");
             }
-            event.setCancelled(true);
-            event.setCancelReason(new TextComponent(sb.toString()));
+            event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, sb.toString());
         }
     }
 
@@ -135,30 +137,26 @@ public class AerRegexFilter extends Plugin implements Listener {
         return len;
     }
 
-    private void saveDefaultConfig() {
-        if (!getDataFolder().exists()) getDataFolder().mkdir();
-        File file = new File(getDataFolder(), "config.yml");
-        if (!file.exists()) {
-            try (InputStream in = getResourceAsStream("config.yml")) {
-                Files.copy(in, file.toPath());
-            } catch (IOException e) { e.printStackTrace(); }
-        }
-    }
-
-    private static class FilterCommand extends Command {
+    private static class FilterCommand implements CommandExecutor {
         private final AerRegexFilter plugin;
+
         public FilterCommand(AerRegexFilter plugin) {
-            super("aerregexfilter", "aerregexfilter.admin", "agf");
             this.plugin = plugin;
         }
+
         @Override
-        public void execute(CommandSender sender, String[] args) {
+        public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
             if (args.length > 0 && args[0].equalsIgnoreCase("reload")) {
+                if (!sender.hasPermission("aerregexfilter.admin")) {
+                    sender.sendMessage(ChatColor.RED + "你没有执行此命令的权限。");
+                    return true;
+                }
                 plugin.loadConfig();
-                sender.sendMessage(new TextComponent(ChatColor.GREEN + "AerRegexFilter -> 配置文件已重载"));
-                return;
+                sender.sendMessage(ChatColor.GREEN + "AerRegexFilter -> 配置文件已重载");
+                return true;
             }
-            sender.sendMessage(new TextComponent("§e§lAerRegexFilter §r§7for §b§lYanYuTing §8| §r§fby. §dAerMini"));
+            sender.sendMessage("§e§lAerRegexFilter §r§7for §b§lYanYuTing §8| §r§fby. §dAerMini");
+            return true;
         }
     }
 }
