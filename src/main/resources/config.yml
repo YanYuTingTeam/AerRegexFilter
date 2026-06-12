@@ -216,3 +216,5 @@ chat:
 
   replace:
     '厉害': '(?i)\b(L+|fv+|fvv+|fw+)(?:[\s\.]*(?:L+|fv+|fvv+|fw+))*\b'
+
+debug: false

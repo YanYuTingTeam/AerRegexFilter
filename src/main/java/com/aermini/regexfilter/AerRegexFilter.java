@@ -111,9 +111,20 @@ public class AerRegexFilter extends Plugin implements Listener {
     public void onPreLogin(PreLoginEvent event) {
         if (!config.getBoolean("regexfilter.name", true)) return;
         String name = event.getConnection().getName();
-        boolean invalid = (getVisualLength(name) > config.getInt("name.maxlenth", 16)) ||
-                         (!nameAllowPattern.matcher(name).matches()) ||
-                         (nameRegex != null && nameRegex.matcher(name).find());
+        boolean isLengthInvalid = getVisualLength(name) > config.getInt("name.maxlenth", 16);
+        boolean isAllowedInvalid = !nameAllowPattern.matcher(name).matches();
+        boolean isRegexMatched = false;
+        String offendingWord = "none";
+        String filteredName = name;
+        if (nameRegex != null) {
+            java.util.regex.Matcher m = nameRegex.matcher(name);
+            if (m.find()) {
+                isRegexMatched = true;
+                offendingWord = m.group();
+                filteredName = m.replaceAll("*");}}
+        boolean invalid = isLengthInvalid || isAllowedInvalid || isRegexMatched;
+        if (config.getBoolean("debug", true)) getLogger().severe(String.format("onPreLogin player->%s | lenth->%s(val->%s), allowed->%s, regexmatch->%s(offending->%s), filtered->%s",
+                name, isLengthInvalid, getVisualLength(name), isAllowedInvalid, isRegexMatched, offendingWord, filteredName));
         if (invalid && config.getBoolean("name.forbidden-kick", true)) {
             List<String> messages = config.getStringList("name.kick-message");
             StringBuilder sb = new StringBuilder();
